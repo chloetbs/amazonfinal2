@@ -52,7 +52,7 @@ TEXT_COL_CANDIDATES = [
 # Significance weighting threshold:
 # Products must share at least this many common raters
 # for their similarity to be fully trusted.
-SIGNIFICANCE_THRESHOLD = 10
+SIGNIFICANCE_THRESHOLD = 10 #BEKIJKEN
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -72,8 +72,9 @@ def find_text_column(df: pd.DataFrame) -> Optional[str]:
 def load_sentiment_lexicons() -> Tuple[set, set]:
     """
     Load Hu & Liu opinion lexicon (~2 000 positive, ~4 800 negative words).
-    Falls back to a small built-in set if files are missing.
+    Falls back to a small built-in set if files are missing. 
     """
+    #BEKIJKEN
     def _load(path, fallback):
         if not os.path.exists(path):
             return fallback
