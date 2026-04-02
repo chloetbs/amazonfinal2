@@ -882,13 +882,14 @@ def main():
         n_ratings_c = len(df_clean)
         total_cells = n_users_c * n_prods_c
         sparsity = (1 - n_ratings_c / total_cells) * 100 if total_cells > 0 else 0
+        sparsity = min(sparsity, 99.99)
 
         st.markdown(f"""
         <div class="stat-grid">
             <div class="stat-card"><div class="number">{n_users:,}</div><div class="label">Total Users</div></div>
             <div class="stat-card"><div class="number">{n_prods:,}</div><div class="label">Total Products</div></div>
             <div class="stat-card"><div class="number">{n_ratings:,}</div><div class="label">Total Ratings</div></div>
-            <div class="stat-card"><div class="number orange">{sparsity:.1f}%</div><div class="label">Matrix Sparsity</div></div>
+            <div class="stat-card"><div class="number orange">{sparsity:.2f}%</div><div class="label">Matrix Sparsity</div></div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -903,7 +904,7 @@ def main():
 
         st.markdown(f"""
         <div class="insight-box">
-            <b>Sparsity = {sparsity:.1f}%</b> means that out of {total_cells:,} possible user-product combinations,
+            <b>Sparsity = {sparsity:.2f}%</b> means that out of {total_cells:,} possible user-product combinations,
             only {n_ratings_c:,} ({100-sparsity:.2f}%) contain actual ratings. This is the central challenge of
             recommendation systems and why we need significance weighting.
         </div>
