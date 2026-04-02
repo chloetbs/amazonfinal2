@@ -1114,10 +1114,11 @@ def main():
     with tab5:
         st.markdown('<div class="section-header">Admin Panel</div>', unsafe_allow_html=True)
 
-        admin_lookup, admin_add_user, admin_add_review = st.tabs([
+        admin_lookup, admin_add_user, admin_add_review, admin_delete = st.tabs([
             "🔍 Look Up User",
             "➕ Add New User",
             "⭐ Add Review",
+            "🗑️ Delete Review",
         ])
 
         # ── Look Up User ──────────────────────────────────────────────────────
@@ -1229,7 +1230,53 @@ def main():
                         "Timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                     })
                     st.success(f"✅ Review added for **{uid_rev}**. Check it in **Look Up User**.")
+# ── Delete Review ─────────────────────────────────────────────────
+        with admin_delete:
+            st.markdown("Remove a specific review from an existing user.")
 
+            del_uid_input = st.text_input("User ID", key="del_uid_input", placeholder="Enter user ID to load their reviews")
+            load_btn = st.button("Load Reviews", key="load_del_btn")
+
+            if load_btn:
+                uid = del_uid_input.strip()
+                if not uid:
+                    st.warning("Please enter a User ID.")
+                else:
+                    master = get_master_df()
+                    user_rows = master[master["UserId"].astype(str) == uid]
+                    if user_rows.empty:
+                        st.error(f"No user found with ID **{uid}**.")
+                    else:
+                        st.session_state["del_user_rows"] = user_rows
+                        st.session_state["del_uid_val"] = uid
+
+            if "del_user_rows" in st.session_state:
+                user_rows = st.session_state["del_user_rows"]
+                uid = st.session_state["del_uid_val"]
+
+                st.markdown(f'<div class="insight-box">Found <b>{len(user_rows)}</b> review(s) for user <code>{uid}</code>. Select one to delete.</div>', unsafe_allow_html=True)
+
+                options = []
+                for i, row in user_rows.iterrows():
+                    pid    = str(row["ProductId"])
+                    pname  = id_to_name.get(pid, pid)
+                    rating = int(row["Rating"]) if not pd.isna(row["Rating"]) else 0
+                    stars  = "⭐" * rating
+                    rev    = str(row.get("Reviews", "") or "")[:50]
+                    options.append((i, f"{pname[:40]} — {stars} — {rev}"))
+
+                labels  = [o[1] for o in options]
+                indices = [o[0] for o in options]
+
+                selected_label = st.selectbox("Select review to delete", options=labels, key="del_select")
+                selected_index = indices[labels.index(selected_label)]
+
+                if st.button("🗑️ Delete this review", key="del_btn"):
+                    master = get_master_df()
+                    st.session_state["master_df"] = master.drop(index=selected_index).reset_index(drop=True)
+                    del st.session_state["del_user_rows"]
+                    del st.session_state["del_uid_val"]
+                    st.success("✅ Review deleted! Go to **Look Up User** to verify.")
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # FOOTER
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
