@@ -131,46 +131,6 @@ def compute_effective_rating(row: pd.Series, text_col: Optional[str]) -> float:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ADMIN HELPERS  (new)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-AMAZON_ID_RE = re.compile(r'^[A-Z0-9]{28}$')
-
-
-def is_valid_amazon_id(uid: str) -> bool:
-    """28 chars, starts with A, uppercase letters and digits only."""
-    return bool(AMAZON_ID_RE.match(uid)) and uid.startswith("A")
-
-
-def generate_amazon_id() -> str:
-    """Generate a random Amazon-style user ID."""
-    chars = string.ascii_uppercase + string.digits
-    return "A" + "".join(random.choices(chars, k=27))
-
-
-def get_master_df() -> pd.DataFrame:
-    """
-    Master DataFrame in session state.
-    Loaded once from disk; Admin additions live here for the session.
-    """
-    if "master_df" not in st.session_state:
-        df = pd.read_excel(DATA_FILE)
-        for col in ("UserId", "ProductId"):
-            if col in df.columns:
-                df[col] = df[col].astype(str)
-        df["Rating"] = pd.to_numeric(df["Rating"], errors="coerce")
-        st.session_state["master_df"] = df
-    return st.session_state["master_df"]
-
-
-def append_row_to_master(new_row: dict) -> None:
-    df = get_master_df()
-    st.session_state["master_df"] = pd.concat(
-        [df, pd.DataFrame([new_row])], ignore_index=True
-    )
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DATA LOADING & CLEANING
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @st.cache_data(show_spinner="Loading and cleaning data...")
@@ -200,6 +160,86 @@ def load_and_clean_data(data_path: str, min_ratings: int = 5):
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
+    df["Rating"] = pd.to_numeric(df["Rating"], errors="coerce")
+    df = df.dropna(subset=["Rating"])
+
+    df_raw = df.copy()
+    all_user_ids = df["UserId"].unique().tolist()
+
+    id_to_name = {}
+    if "product_name" in df.columns:
+        id_to_name = (
+            df[["ProductId", "product_name"]]
+            .dropna(subset=["ProductId"])
+            .drop_duplicates("ProductId")
+            .set_index("ProductId")["product_name"]
+            .astype(str).to_dict()
+        )
+
+    text_col = find_text_column(df)
+
+    counts = df.groupby("ProductId")["Rating"].count()
+    valid = counts[counts >= min_ratings].index
+    df_clean = df[df["ProductId"].isin(valid)].copy()
+
+    df_clean["EffectiveRating"] = df_clean.apply(
+        lambda r: compute_effective_rating(r, text_col), axis=1
+    )
+    df_clean = df_clean.dropna(subset=["EffectiveRating"])
+
+    if text_col:
+        df_clean["has_text_review"] = df_clean[text_col].apply(
+            lambda v: isinstance(v, str) and len(str(v).strip()) >= 5
+        )
+    else:
+        df_clean["has_text_review"] = False
+    df_clean["sentiment_component"] = df_clean["EffectiveRating"] - df_clean["Rating"]
+
+    user_item = df_clean.pivot_table(
+        index="UserId", columns="ProductId",
+        values="EffectiveRating", fill_value=0.0,
+    )
+
+    sim_counts = df_clean.groupby("ProductId")["Rating"].count()
+    valid_sim = sim_counts[sim_counts >= min_ratings].index
+    item_vectors = user_item.T.loc[valid_sim]
+
+    raw_sim = cosine_similarity(item_vectors)
+    binary_matrix = (item_vectors.values > 0).astype(float)
+    common_raters = binary_matrix @ binary_matrix.T
+    sig_weights = np.minimum(common_raters, SIGNIFICANCE_THRESHOLD) / SIGNIFICANCE_THRESHOLD
+    weighted_sim = raw_sim * sig_weights
+
+    item_similarity = pd.DataFrame(
+        weighted_sim, index=item_vectors.index, columns=item_vectors.index
+    )
+
+    return df_raw, df_clean, user_item, item_similarity, text_col, all_user_ids, id_to_name
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ADMIN HELPERS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AMAZON_ID_RE = re.compile(r'^[A-Z0-9]{28}$')
+
+def is_valid_amazon_id(uid: str) -> bool:
+    """28 chars, starts with A, uppercase letters and digits only."""
+    return bool(AMAZON_ID_RE.match(uid)) and uid.startswith("A")
+
+def generate_amazon_id() -> str:
+    """Generate a random Amazon-style user ID."""
+    chars = string.ascii_uppercase + string.digits
+    return "A" + "".join(random.choices(chars, k=27))
+
+def get_master_df() -> pd.DataFrame:
+    """Returns the cleaned master DataFrame from session state."""
+    return st.session_state["master_df"]
+
+def append_row_to_master(new_row: dict) -> None:
+    df = get_master_df()
+    st.session_state["master_df"] = pd.concat(
+        [df, pd.DataFrame([new_row])], ignore_index=True
+    )
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MODEL EVALUATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -593,6 +633,9 @@ def main():
         st.error(f"Could not load data: {e}")
         st.stop()
     load_time = time.time() - t0
+
+    if "master_df" not in st.session_state:
+        st.session_state["master_df"] = df_raw
 
     product_ids = user_item.columns.astype(str).tolist()
     all_uids = set(str(u) for u in all_user_ids)
@@ -1202,3 +1245,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
