@@ -706,7 +706,7 @@ def main():
             .reset_index().rename(columns={"index": "ProductId"})
         )
         df_pred = df_pred.merge(summary, on="ProductId", how="left")
-        df_pred["similarity"] = (df_pred["predicted"] / 5.0).clip(0, 1)
+        df_pred["similarity"] = (df_pred["predicted"] - 1) / 4.0
         return df_pred
 
     def item_based_recs(pid, k=5):
@@ -764,8 +764,7 @@ def main():
 
                     # Match badge
                     if pd.isna(sim):
-                        trend = float(np.clip(avg_e / 5.0 * 100, 0, 100)) if not pd.isna(avg_e) else 0
-                        badge = f'<span class="match-badge match-trend">Trend: {trend:.0f}%</span>'
+                        badge = f'<span class="match-badge match-trend">⭐ Top Rated</span>'
                     else:
                         pct = float(sim) * 100 if 0 <= float(sim) <= 1 else float(np.clip(sim / 5 * 100, 0, 100))
                         if pct >= 70:
