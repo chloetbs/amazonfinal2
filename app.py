@@ -42,7 +42,7 @@ except ImportError:
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-DATA_FILE = "group7_cleaned.xlsx"
+DATA_FILE = "Group7.xlsx"
 
 TEXT_COL_CANDIDATES = [
     "ReviewText", "Text", "Review", "Reviews",
@@ -52,7 +52,7 @@ TEXT_COL_CANDIDATES = [
 # Significance weighting threshold:
 # Products must share at least this many common raters
 # for their similarity to be fully trusted.
-SIGNIFICANCE_THRESHOLD = 10 #BEKIJKEN
+SIGNIFICANCE_THRESHOLD = 10 
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -74,7 +74,6 @@ def load_sentiment_lexicons() -> Tuple[set, set]:
     Load Hu & Liu opinion lexicon (~2 000 positive, ~4 800 negative words).
     Falls back to a small built-in set if files are missing. 
     """
-    #BEKIJKEN
     def _load(path, fallback):
         if not os.path.exists(path):
             return fallback
@@ -174,18 +173,9 @@ def append_row_to_master(new_row: dict) -> None:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DATA LOADING & CLEANING
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 @st.cache_data(show_spinner="Loading and cleaning data...")
 def load_and_clean_data(data_path: str, min_ratings: int = 5):
-    """
-    Full ETL pipeline:
-      1. Read Excel -> DataFrame
-      2. Coerce Rating to numeric, drop NaN
-      3. Cold Start filter (remove products with < min_ratings)
-      4. Compute Effective Rating (hybrid with sentiment)
-      5. Build User-Item matrix (fill NaN -> 0 for sparsity)
-      6. Compute item-item cosine similarity with significance weighting
-    """
+
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"'{data_path}' not found. Place it next to app.py.")
 
@@ -194,76 +184,21 @@ def load_and_clean_data(data_path: str, min_ratings: int = 5):
         if col in df.columns:
             df[col] = df[col].astype(str)
 
+    # ── DATA CLEANING ──────────────────────────────
+    df["UserId"] = df["UserId"].str.replace(r'(_\d+)+$', '', regex=True)
+    if "Reviews" in df.columns:
+        df["Reviews"] = df["Reviews"].fillna("").str.strip()
+    text_col_name = find_text_column(df)
+    dedup_cols = ["UserId", "ProductId", "Rating"]
+    if text_col_name:
+        dedup_cols.append(text_col_name)
+    df = df.drop_duplicates(subset=dedup_cols)
+    # ──────────────────────────────────────────────
+
     required = {"UserId", "ProductId", "Rating"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing columns: {missing}")
-
-    df["Rating"] = pd.to_numeric(df["Rating"], errors="coerce")
-    df = df.dropna(subset=["Rating"])
-
-    # Raw copy for EDA (before filtering)
-    df_raw = df.copy()
-    all_user_ids = df["UserId"].unique().tolist()
-
-    # Product name mapping
-    id_to_name = {}
-    if "product_name" in df.columns:
-        id_to_name = (
-            df[["ProductId", "product_name"]]
-            .dropna(subset=["ProductId"])
-            .drop_duplicates("ProductId")
-            .set_index("ProductId")["product_name"]
-            .astype(str).to_dict()
-        )
-
-    text_col = find_text_column(df)
-
-    # -- Cold Start Filter --
-    counts = df.groupby("ProductId")["Rating"].count()
-    valid = counts[counts >= min_ratings].index
-    df_clean = df[df["ProductId"].isin(valid)].copy()
-
-    # -- Hybrid Effective Rating --
-    df_clean["EffectiveRating"] = df_clean.apply(
-        lambda r: compute_effective_rating(r, text_col), axis=1
-    )
-    df_clean = df_clean.dropna(subset=["EffectiveRating"])
-
-    # Sentiment metadata
-    if text_col:
-        df_clean["has_text_review"] = df_clean[text_col].apply(
-            lambda v: isinstance(v, str) and len(str(v).strip()) >= 5
-        )
-    else:
-        df_clean["has_text_review"] = False
-    df_clean["sentiment_component"] = df_clean["EffectiveRating"] - df_clean["Rating"]
-
-    # -- User-Item Matrix --
-    user_item = df_clean.pivot_table(
-        index="UserId", columns="ProductId",
-        values="EffectiveRating", fill_value=0.0,
-    )
-
-    # -- Item-Item Similarity with Significance Weighting --
-    sim_counts = df_clean.groupby("ProductId")["Rating"].count()
-    valid_sim = sim_counts[sim_counts >= min_ratings].index
-    item_vectors = user_item.T.loc[valid_sim]
-
-    raw_sim = cosine_similarity(item_vectors)
-
-    binary_matrix = (item_vectors.values > 0).astype(float)
-    common_raters = binary_matrix @ binary_matrix.T
-
-    sig_weights = np.minimum(common_raters, SIGNIFICANCE_THRESHOLD) / SIGNIFICANCE_THRESHOLD
-    weighted_sim = raw_sim * sig_weights
-
-    item_similarity = pd.DataFrame(
-        weighted_sim, index=item_vectors.index, columns=item_vectors.index
-    )
-
-    return df_raw, df_clean, user_item, item_similarity, text_col, all_user_ids, id_to_name
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MODEL EVALUATION
