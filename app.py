@@ -1,21 +1,3 @@
-"""
-=======================================================================
-Amazon Product Recommendation System — TBS Barcelona, Group 7
-=======================================================================
-
-Three recommendation strategies:
-  1. Popularity-Based   → Cold Start fallback for new / unknown users
-  2. User-Based CF      → "Users who shop like you also bought…"
-  3. Item-Based CF      → "Customers who bought X also bought Y…"
-
-Hybrid Effective Rating (Lecture 3):
-    EffectiveRating = Rating + 0.1 × Sentiment
-
-Cosine Similarity (Lecture 4):
-    sim(X, Y) = (X · Y) / (||X|| × ||Y||)
-=======================================================================
-"""
-
 import os
 import re
 import time
@@ -30,7 +12,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import train_test_split
 import streamlit as st
 
-# Plotly for interactive EDA charts — install with: pip install plotly
 try:
     import plotly.express as px
     import plotly.graph_objects as go
@@ -38,9 +19,7 @@ try:
 except ImportError:
     HAS_PLOTLY = False
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 DATA_FILE = "Group7.xlsx"
 
@@ -49,15 +28,11 @@ TEXT_COL_CANDIDATES = [
     "Summary", "review_text", "text",
 ]
 
-# Significance weighting threshold:
-# Products must share at least this many common raters
-# for their similarity to be fully trusted.
 SIGNIFICANCE_THRESHOLD = 10 
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # UTILITY FUNCTIONS
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 
 def find_text_column(df: pd.DataFrame) -> Optional[str]:
     """Auto-detect the review text column (case-insensitive match)."""
@@ -70,10 +45,6 @@ def find_text_column(df: pd.DataFrame) -> Optional[str]:
 
 @st.cache_resource(show_spinner=False)
 def load_sentiment_lexicons() -> Tuple[set, set]:
-    """
-    Load Hu & Liu opinion lexicon (~2 000 positive, ~4 800 negative words).
-    Falls back to a small built-in set if files are missing. 
-    """
     def _load(path, fallback):
         if not os.path.exists(path):
             return fallback
@@ -99,10 +70,6 @@ def load_sentiment_lexicons() -> Tuple[set, set]:
 
 
 def sentiment_score(text: str) -> float:
-    """
-    Lexicon-based sentiment:  (positive_count - negative_count) / token_count
-    Returns value in [-1, 1].
-    """
     if not isinstance(text, str) or not text.strip():
         return 0.0
     pos_words, neg_words = load_sentiment_lexicons()
@@ -115,13 +82,6 @@ def sentiment_score(text: str) -> float:
 
 
 def compute_effective_rating(row: pd.Series, text_col: Optional[str]) -> float:
-    """
-    Hybrid Effective Rating (Lecture 3):
-        EffectiveRating = Rating + 0.1 * Sentiment
-
-    The 0.1 weight ensures sentiment adjusts the rating gently.
-    A 5-star review with negative text becomes ~4.9, not 3.0.
-    """
     rating = row["Rating"]
     if pd.isna(rating):
         return np.nan
@@ -130,9 +90,8 @@ def compute_effective_rating(row: pd.Series, text_col: Optional[str]) -> float:
     return float(rating + 0.1 * sentiment_score(row[text_col]))
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DATA LOADING & CLEANING
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 @st.cache_data(show_spinner="Loading and cleaning data...")
 def load_and_clean_data(data_path: str, min_ratings: int = 5):
 
@@ -144,7 +103,7 @@ def load_and_clean_data(data_path: str, min_ratings: int = 5):
         if col in df.columns:
             df[col] = df[col].astype(str)
 
-    # ── DATA CLEANING ──────────────────────────────
+    # DATA CLEANING 
     df["UserId"] = df["UserId"].str.replace(r'(_\d+)+$', '', regex=True)
     if "Reviews" in df.columns:
         df["Reviews"] = df["Reviews"].fillna("").str.strip()
@@ -153,7 +112,7 @@ def load_and_clean_data(data_path: str, min_ratings: int = 5):
     if text_col_name:
         dedup_cols.append(text_col_name)
     df = df.drop_duplicates(subset=dedup_cols)
-    # ──────────────────────────────────────────────
+    
 
     required = {"UserId", "ProductId", "Rating"}
     missing = required - set(df.columns)
@@ -216,23 +175,20 @@ def load_and_clean_data(data_path: str, min_ratings: int = 5):
 
     return df_raw, df_clean, user_item, item_similarity, text_col, all_user_ids, id_to_name
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   
 # ADMIN HELPERS
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 
 AMAZON_ID_RE = re.compile(r'^[A-Z0-9]{28}$')
 
 def is_valid_amazon_id(uid: str) -> bool:
-    """28 chars, starts with A, uppercase letters and digits only."""
     return bool(AMAZON_ID_RE.match(uid)) and uid.startswith("A")
 
 def generate_amazon_id() -> str:
-    """Generate a random Amazon-style user ID."""
     chars = string.ascii_uppercase + string.digits
     return "A" + "".join(random.choices(chars, k=27))
 
 def get_master_df() -> pd.DataFrame:
-    """Returns the cleaned master DataFrame from session state."""
     return st.session_state["master_df"]
 
 def append_row_to_master(new_row: dict) -> None:
@@ -246,14 +202,6 @@ def append_row_to_master(new_row: dict) -> None:
 
 @st.cache_data(show_spinner="Evaluating model...")
 def evaluate_model(df_clean: pd.DataFrame, min_ratings: int = 5) -> dict:
-    """
-    80/20 train/test evaluation of Item-Based CF.
-
-    Metrics:
-      RMSE  - root mean square error of predicted vs actual ratings
-      MAE   - mean absolute error
-      Precision@5 - when we predict >= 4 stars, how often is actual >= 4 stars?
-    """
     uc = df_clean.groupby("UserId").size()
     eligible = uc[uc >= 5].index
     df_e = df_clean[df_clean["UserId"].isin(eligible)].copy()
@@ -316,9 +264,7 @@ def evaluate_model(df_clean: pd.DataFrame, min_ratings: int = 5) -> dict:
     }
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # RECOMMENDATION FUNCTIONS
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def get_similar_products(pid: str, sim_df: pd.DataFrame, top_n: int = 10) -> pd.Series:
     """Return top_n most similar products (excluding self) from the similarity matrix."""
@@ -328,9 +274,7 @@ def get_similar_products(pid: str, sim_df: pd.DataFrame, top_n: int = 10) -> pd.
     return scores.sort_values(ascending=False).head(top_n)
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STREAMLIT APP
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def main():
     st.set_page_config(
@@ -340,9 +284,7 @@ def main():
         initial_sidebar_state="expanded",
     )
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # CSS - Complete visual overhaul
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # CSS 
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -585,9 +527,7 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # HERO
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     st.markdown("""
     <div class="hero">
         <h1>🛒 Amazon <span>Recommendation</span> Engine</h1>
@@ -596,9 +536,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # SIDEBAR
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with st.sidebar:
         st.markdown("### Settings")
         min_ratings = st.slider(
@@ -622,9 +560,9 @@ def main():
         **Match Score** = Cosine Similarity x Significance Weight
         """)
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  
     # LOAD DATA
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
     t0 = time.time()
     try:
         (df_raw, df_clean, user_item, item_similarity,
@@ -646,7 +584,6 @@ def main():
         st.warning("No products left after filtering. Lower the Cold Start threshold.")
         st.stop()
 
-    # Product labels: "Name (ID)" for searchable dropdown
     product_options = []
     label_to_id = {}
     for pid in product_ids:
@@ -655,7 +592,6 @@ def main():
         product_options.append(label)
         label_to_id[label] = pid
 
-    # Summary stats per product
     summary = (
         df_clean.groupby("ProductId").agg(
             n_ratings=("Rating", "count"),
@@ -666,9 +602,9 @@ def main():
         ).reset_index()
     )
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
     # RECOMMENDATION FUNCTIONS
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  
 
     def popularity_recs(k=5):
         r = summary[summary["n_ratings"] >= 5].nlargest(k, "avg_effective").copy()
@@ -725,9 +661,9 @@ def main():
         )
         return df_r
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   
     # CARD RENDERER
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   
 
     def stars_html(val):
         if pd.isna(val):
@@ -799,9 +735,9 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   
     # TABS
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "👤 User-Based", "📦 Product-Based",
@@ -841,7 +777,7 @@ def main():
                 st.info("New user detected - showing trending best sellers.")
                 render_cards(popularity_recs(top_n))
 
-    # -- TAB 2: PRODUCT-BASED --
+    # TAB 2: PRODUCT-BASED 
     with tab2:
         st.markdown('<div class="section-header">Similar Products</div>', unsafe_allow_html=True)
         st.markdown("Select a product to find items that similar customers also purchased.")
@@ -868,7 +804,7 @@ def main():
             else:
                 st.info("No similar products found for this selection.")
 
-    # -- TAB 3: DATA INSIGHTS --
+    # TAB 3: DATA INSIGHTS 
     with tab3:
         st.markdown('<div class="section-header">Exploratory Data Analysis</div>', unsafe_allow_html=True)
         st.markdown("Understanding the dataset before building any model. These metrics reveal **sparsity**, **distribution**, and **sentiment** patterns.")
@@ -929,7 +865,7 @@ def main():
             st.dataframe(top10[["name", "n_ratings", "avg_rating"]].reset_index(drop=True))
 
         else:
-            # -- Rating Distribution --
+            # Rating Distribution 
             col_a, col_b = st.columns(2)
             with col_a:
                 st.markdown("##### ⭐ Rating Distribution")
@@ -1066,7 +1002,7 @@ def main():
         - **Popularity Fallback**: new users get best sellers instead of noisy predictions
         """)
 
-    # -- TAB 4: EVALUATION --
+    # TAB 4: EVALUATION 
     with tab4:
         st.markdown('<div class="section-header">Model Evaluation</div>', unsafe_allow_html=True)
         st.markdown("""
@@ -1085,7 +1021,7 @@ def main():
                 <div class="stat-grid">
                     <div class="stat-card"><div class="number">{results['rmse']:.3f}</div><div class="label">RMSE</div></div>
                     <div class="stat-card"><div class="number">{results['mae']:.3f}</div><div class="label">MAE</div></div>
-                    <div class="stat-card"><div class="number orange">{results['precision']:.0%}</div><div class="label">Precision@5</div></div>
+                    <div class="stat-card"><div class="number orange">{results['precision']:.0%}</div><div class="label">Precision</div></div>
                     <div class="stat-card"><div class="number">{results['n_preds']:,}</div><div class="label">Predictions</div></div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -1110,7 +1046,7 @@ def main():
                 on average. Amazon would A/B test this engine vs the current one and measure revenue per session.
                 """)
 
-    # -- TAB 5: ADMIN --
+    # TAB 5: ADMIN 
     with tab5:
         st.markdown('<div class="section-header">Admin Panel</div>', unsafe_allow_html=True)
 
@@ -1121,7 +1057,7 @@ def main():
             "🗑️ Delete Review",
         ])
 
-        # ── Look Up User ──────────────────────────────────────────────────────
+        # Look Up User 
         with admin_lookup:
             st.markdown("Search for any user to see all their reviews.")
             lookup_uid = st.text_input("User ID", key="lookup_uid")
@@ -1159,7 +1095,7 @@ def main():
                             </div>
                             """, unsafe_allow_html=True)
 
-        # ── Add New User ──────────────────────────────────────────────────────
+        # Add New User 
         with admin_add_user:
             st.markdown(
                 "Add a new user. The ID must be **exactly 28 characters**, "
@@ -1205,7 +1141,7 @@ def main():
                     })
                     st.success(f"✅ User **{uid_val}** added! Look them up in **Look Up User** to verify.")
 
-        # ── Add Review ────────────────────────────────────────────────────────
+        # Add Review 
         with admin_add_review:
             st.markdown("Log a new rating and review for an **existing** user.")
 
@@ -1230,7 +1166,7 @@ def main():
                         "Timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                     })
                     st.success(f"✅ Review added for **{uid_rev}**. Check it in **Look Up User**.")
-# ── Delete Review ─────────────────────────────────────────────────
+#  Delete Review 
         with admin_delete:
             st.markdown("Remove a specific review from an existing user.")
 
@@ -1277,9 +1213,9 @@ def main():
                     del st.session_state["del_user_rows"]
                     del st.session_state["del_uid_val"]
                     st.success("✅ Review deleted! Go to **Look Up User** to verify.")
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
     # FOOTER
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   
     st.markdown(f"""
     <div class="footer">
         <b>TBS Barcelona - Group 7</b> |
